@@ -403,7 +403,7 @@ class GbqConnector(object):
 
         raise GenericGBQException("Reason: {0}".format(ex))
 
-    def run_query(self, query, **kwargs):
+    def run_query(self, query, dtypes=None, **kwargs):
         from concurrent.futures import TimeoutError
         from google.auth.exceptions import RefreshError
         from google.cloud import bigquery
@@ -500,9 +500,17 @@ class GbqConnector(object):
 
         schema_fields = [field.to_api_repr() for field in rows_iter.schema]
         nullsafe_dtypes = _bqschema_to_nullsafe_dtypes(schema_fields)
-        df = rows_iter.to_dataframe(
-            dtypes=nullsafe_dtypes, bqstorage_client=self.bqstorage_client
-        )
+
+        # use optional dtypes argument for optimizing memory use
+        # otherwise default pandas-gbq behaviour with nullsafe_dtypes
+        if dtypes:
+            df = rows_iter.to_dataframe(
+                dtypes=dtypes, bqstorage_client=self.bqstorage_client
+            )
+        else:
+            df = rows_iter.to_dataframe(
+                dtypes=nullsafe_dtypes, bqstorage_client=self.bqstorage_client
+            )
 
         if df.empty:
             df = _cast_empty_df_dtypes(schema_fields, df)
@@ -769,6 +777,7 @@ def read_gbq(
     use_bqstorage_api=False,
     verbose=None,
     private_key=None,
+    dtypes=None,
 ):
     r"""Load data from Google BigQuery using google-cloud-python
 
@@ -881,6 +890,14 @@ def read_gbq(
         or string contents. This is useful for remote server
         authentication (eg. Jupyter/IPython notebook on remote host).
 
+        .. versionadded:: 0.11.0
+    dtypes : dict, optional, default None
+        A dictionairy of column names with pandas `dtypes`. The provided 
+        `dtype` is passed to the
+        :func:`google.cloud.bigquery.job.QueryJob.to_dataframe`
+        method, used when constructing the series for the column specified.
+        Otherwise, the default pandas-gbq behaviour is used.
+
     Returns
     -------
     df: DataFrame
@@ -924,7 +941,10 @@ def read_gbq(
         use_bqstorage_api=use_bqstorage_api,
     )
 
-    final_df = connector.run_query(query, configuration=configuration)
+    final_df = connector.run_query(
+        query,
+        configuration=configuration,
+        dtypes=dtypes)
 
     # Reindex the DataFrame on the provided column
     if index_col is not None:
