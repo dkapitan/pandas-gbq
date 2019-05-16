@@ -25,6 +25,7 @@
 .env
 .venv
 .sublime*
+Pipfile*
 
 # Docs #
 ########
@@ -94,6 +95,3 @@ Thumbs.db
 ###############
 bigquery_credentials.dat
 ci/service_account.json
-Pipfile
-.venv
-Pipfile.lock
