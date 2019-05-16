@@ -23,6 +23,8 @@
 .testmon*
 .vscode/
 .env
+.venv
+.sublime*
 
 # Docs #
 ########
