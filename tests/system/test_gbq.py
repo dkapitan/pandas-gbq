@@ -397,6 +397,61 @@ class TestReadGBQIntegration(object):
         )
         assert is_expected_dtype(df["_"].dtype)
 
+    @pytest.mark.parametrize(
+        "specified_dtype",
+        [
+            (np.uint8,),
+            (np.uint16,),
+            (np.uint32,),
+            (np.uint64,),
+            ('Int64',),
+            (np.int8,),
+            (np.int16,),
+            (np.int32,),
+            (np.int64,),
+        ],
+    )
+    def test_return_correct_specified_int_types(
+        self, project_id, specified_dtype
+    ):
+        query = "SELECT CAST(1 AS INT64) AS _"
+        df = gbq.read_gbq(
+            query,
+            project_id=project_id,
+            credentials=self.credentials,
+            dialect="standard",
+            dtypes={'_': specified_dtype},
+        )
+        assert specified_dtype == df["_"].dtype
+
+    def test_return_correct_specified_category_type(
+        self, project_id
+    ):
+        specified_dtype = 'category'
+        query = "SELECT CAST('foo' AS STRING) AS _"
+        df = gbq.read_gbq(
+            query,
+            project_id=project_id,
+            credentials=self.credentials,
+            dialect="standard",
+            dtypes={'_': specified_dtype},
+        )
+        assert specied_dtype == df["_"].dtype
+
+    def test_return_correct_specified_float_type(
+        self, project_id
+    ):
+        specified_dtype = np.float32
+        query = "SELECT CAST(1.1 AS FLOAT64) AS _"
+        df = gbq.read_gbq(
+            query,
+            project_id=project_id,
+            credentials=self.credentials,
+            dialect="standard",
+            dtypes={'_': specified_dtype},
+        )
+        assert specified_dtype == df["_"].dtype
+
     def test_should_properly_handle_null_timestamp(self, project_id):
         query = "SELECT TIMESTAMP(NULL) AS null_timestamp"
         df = gbq.read_gbq(
