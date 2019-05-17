@@ -674,7 +674,7 @@ def _bqschema_to_nullsafe_dtypes(schema_fields):
     Otherwise, use pandas's default dtype choice.
 
     See: http://pandas.pydata.org/pandas-docs/dev/missing_data.html
-    #missing-data-casting-rules-and-indexing
+    # missing-data-casting-rules-and-indexing
     """
     # If you update this mapping, also update the table at
     # `docs/source/reading.rst`.
@@ -892,7 +892,7 @@ def read_gbq(
 
         .. versionadded:: 0.11.0
     dtypes : dict, optional, default None
-        A dictionairy of column names with pandas `dtypes`. The provided 
+        A dictionairy of column names with pandas `dtypes`. The provided
         `dtype` is passed to the
         :func:`google.cloud.bigquery.job.QueryJob.to_dataframe`
         method, used when constructing the series for the column specified.
@@ -942,9 +942,8 @@ def read_gbq(
     )
 
     final_df = connector.run_query(
-        query,
-        configuration=configuration,
-        dtypes=dtypes)
+        query, configuration=configuration, dtypes=dtypes
+    )
 
     # Reindex the DataFrame on the provided column
     if index_col is not None:
@@ -1327,22 +1326,6 @@ class _Table(GbqConnector):
         except self.http_error as ex:
             self.process_http_error(ex)
 
-    def describe(self, table_id):
-        """ Get some descriptive statistics of a table in Google BigQuery
-
-        Parameters
-        ----------
-        table : str
-            Name of table to be analyzed
-
-        Returns
-        -------
-        pandas.Dataframe
-            Dataframe with descriptive statistics
-        """
-        pass
-
-
 
 class _Dataset(GbqConnector):
     def __init__(
@@ -1410,18 +1393,109 @@ class _Dataset(GbqConnector):
             self.process_http_error(ex)
 
 
-def get_optimal_dtypes(self, table_id):
-    """ Determine optimal pandas dtypes for a BigQuery table
+def optimize_dtypes(
+    project_id,
+    dataset_id,
+    table_id,
+    reauth=False,
+    dialect="standard",
+    auth_local_webserver=False,
+    location=None,
+    credentials=None,
+    verbose=None,
+    private_key=None,
+):
+    """ Calculate statistics for a BigQuery table and optimize pandas types
+
+    TO DO: add description.
 
     Parameters
     ----------
+    project_id : str
+        Google BigQuery Account project ID
+    dataset_id : str
+        Dataset
     table : str
-        Name of table to be written
+        Name of table
 
     Returns
     -------
     dict
-        A dictionairy of column names with pandas `dtypes`.
+        'dtypes': dict with downcasted dtype per column
+        'df': pandas.Dataframe with the following statistics per SQL type:
+                - INTEGER: MIN, MAX, COUNTIFNULL
+                - STRING: COUNT DISTINCT, ROWCOUNT
     """
-    pass
-        
+    from pandas_gbq.schema import (
+        generate_sql,
+        _determine_int_type,
+        _determine_string_type,
+    )
+    from pandas import DataFrame
+
+    _test_google_api_imports()
+
+    if verbose is not None and SHOW_VERBOSE_DEPRECATION:
+        warnings.warn(
+            "verbose is deprecated and will be removed in "
+            "a future version. Set logging level in order to vary "
+            "verbosity",
+            FutureWarning,
+            stacklevel=2,
+        )
+
+    if private_key is not None and SHOW_PRIVATE_KEY_DEPRECATION:
+        warnings.warn(
+            PRIVATE_KEY_DEPRECATION_MESSAGE, FutureWarning, stacklevel=2
+        )
+
+    if dialect not in ("legacy", "standard"):
+        raise ValueError("'{0}' is not valid for dialect".format(dialect))
+
+    connector = GbqConnector(
+        project_id,
+        reauth=reauth,
+        dialect=dialect,
+        auth_local_webserver=auth_local_webserver,
+        location=location,
+        credentials=credentials,
+        private_key=private_key,
+        use_bqstorage_api=False,
+    )
+
+    schema = connector.schema(dataset_id, table_id)
+    df = (
+        connector.run_query(
+            generate_sql(project_id, dataset_id, table_id, schema)
+        )
+        .transpose()
+        .reset_index()
+        .assign(
+            name=lambda df: df["index"].apply(
+                lambda x: "_".join(x.split("_")[:-1])
+            ),
+            key=lambda df: df["index"].apply(lambda x: (x.split("_")[-1])),
+        )
+        .drop("index", axis=1)
+        .rename(columns={0: "value"})
+        .pivot(index="name", columns="key", values="value")
+        .join(DataFrame(schema).set_index("name"))
+    )
+    dtypes_int = (
+        df.loc[df.type == "INTEGER", :]
+        .apply(
+            lambda row: _determine_int_type(
+                row["min"], row["max"], row["countifnull"]
+            ),
+            axis=1,
+        )
+        .to_dict()
+    )
+    dtypes_string = (
+        df.loc[df.type == "STRING", :]
+        .apply(
+            lambda row: _determine_string_type(row["fractiondistinct"]), axis=1
+        )
+        .to_dict()
+    )
+    return {"dtypes": {**dtypes_int, **dtypes_string}, "df": df}
