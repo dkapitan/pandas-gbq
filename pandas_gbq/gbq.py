@@ -1327,6 +1327,22 @@ class _Table(GbqConnector):
         except self.http_error as ex:
             self.process_http_error(ex)
 
+    def describe(self, table_id):
+        """ Get some descriptive statistics of a table in Google BigQuery
+
+        Parameters
+        ----------
+        table : str
+            Name of table to be analyzed
+
+        Returns
+        -------
+        pandas.Dataframe
+            Dataframe with descriptive statistics
+        """
+        pass
+
+
 
 class _Dataset(GbqConnector):
     def __init__(
@@ -1392,3 +1408,20 @@ class _Dataset(GbqConnector):
             self.client.create_dataset(dataset)
         except self.http_error as ex:
             self.process_http_error(ex)
+
+
+def get_optimal_dtypes(self, table_id):
+    """ Determine optimal pandas dtypes for a BigQuery table
+
+    Parameters
+    ----------
+    table : str
+        Name of table to be written
+
+    Returns
+    -------
+    dict
+        A dictionairy of column names with pandas `dtypes`.
+    """
+    pass
+        
