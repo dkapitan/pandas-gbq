@@ -555,7 +555,7 @@ class GbqConnector(object):
         except self.http_error as ex:
             self.process_http_error(ex)
 
-    def schema(self, dataset_id, table_id):
+    def schema(self, dataset_id, table_id, project_id=None):
         """Retrieve the schema of the table
 
         Obtain from BigQuery the field names and field types
@@ -567,13 +567,24 @@ class GbqConnector(object):
             Name of the BigQuery dataset for the table
         table_id : str
             Name of the BigQuery table
+        project_id : str, optional
+            Name of project. If none, the project_id from the
+            currrent context will be used. This parameter can
+            be used to obtain schema's from tables in another
+            project.
 
         Returns
         -------
         list of dicts
             Fields representing the schema
         """
-        table_ref = self.client.dataset(dataset_id).table(table_id)
+
+        if project_id:
+            table_ref = self.client.get_table(
+                ".".join([project_id, dataset_id, table_id])
+            )
+        else:
+            table_ref = self.client.dataset(dataset_id).table(table_id)
 
         try:
             table = self.client.get_table(table_ref)
@@ -1394,9 +1405,8 @@ class _Dataset(GbqConnector):
 
 
 def optimize_dtypes(
-    project_id,
-    dataset_id,
-    table_id,
+    table_reference_string,
+    default_project_id=None,
     reauth=False,
     dialect="standard",
     auth_local_webserver=False,
@@ -1411,12 +1421,13 @@ def optimize_dtypes(
 
     Parameters
     ----------
-    project_id : str
-        Google BigQuery Account project ID
-    dataset_id : str
-        Dataset
     table : str
-        Name of table
+        Google Bigquery full table reference 'project_id.dataset_id.table_id'
+    default_project_id : str, optional
+        Option to override project obtained from table reference.
+        Use when analyzing table in a different project, 
+        e.g. when querying bigquery-public-data, and supply default_project_id
+        with QueryJob create permsission.
 
     Returns
     -------
@@ -1452,8 +1463,16 @@ def optimize_dtypes(
     if dialect not in ("legacy", "standard"):
         raise ValueError("'{0}' is not valid for dialect".format(dialect))
 
+    # TO DO: make more robust with https://googleapis.github.io/google-cloud-python/latest/_modules/google/cloud/bigquery/client.html#Client.get_table
+    project_id, dataset_id, table_id = table_reference_string.split('.')
+    
+    if default_project_id:
+        connection_project_id = default_project_id
+    else:
+        connection_project_id = project_id
+
     connector = GbqConnector(
-        project_id,
+        connection_project_id,
         reauth=reauth,
         dialect=dialect,
         auth_local_webserver=auth_local_webserver,
@@ -1463,10 +1482,10 @@ def optimize_dtypes(
         use_bqstorage_api=False,
     )
 
-    schema = connector.schema(dataset_id, table_id)
+    schema = connector.schema(dataset_id, table_id, project_id)
     df = (
         connector.run_query(
-            generate_sql(project_id, dataset_id, table_id, schema)
+            generate_sql(table_reference_string, schema)
         )
         .transpose()
         .reset_index()
@@ -1481,21 +1500,31 @@ def optimize_dtypes(
         .pivot(index="name", columns="key", values="value")
         .join(DataFrame(schema).set_index("name"))
     )
-    dtypes_int = (
-        df.loc[df.type == "INTEGER", :]
-        .apply(
-            lambda row: _determine_int_type(
-                row["min"], row["max"], row["countifnull"]
-            ),
-            axis=1,
+
+    if (df.type == "INTEGER").any():
+        dtypes_int = (
+            df.loc[df.type == "INTEGER", :]
+            .apply(
+                lambda row: _determine_int_type(
+                    row["min"], row["max"], row["countifnull"]
+                ),
+                axis=1,
+            )
+            .to_dict()
         )
-        .to_dict()
-    )
-    dtypes_string = (
-        df.loc[df.type == "STRING", :]
-        .apply(
-            lambda row: _determine_string_type(row["fractiondistinct"]), axis=1
+    else:
+        dtypes_int = {}
+
+    if (df.type == "STRING").any():
+        dtypes_string = (
+            df.loc[df.type == "STRING", :]
+            .apply(
+                lambda row: _determine_string_type(row["fractiondistinct"]),
+                axis=1,
+            )
+            .to_dict()
         )
-        .to_dict()
-    )
+    else:
+        dtypes_string = {}
+
     return {"dtypes": {**dtypes_int, **dtypes_string}, "df": df}

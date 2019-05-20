@@ -81,17 +81,31 @@ def update_schema(schema_old, schema_new):
 def select_columns_by_type(schema, bq_type):
     """
     Select columns from schema with type==bq_type
+
+    We only downcast non-repeated INTEGER and STRING columns.
     """
     return [
         field["name"]
         for field in schema
-        for key, value in field.items()
-        if key == "type" and value == bq_type
+        if field["type"] == bq_type and field["mode"] != "REPEATED"
     ]
 
 
-def generate_sql(project_id, dataset_id, table_id, schema):
+def generate_sql(table_reference_string, schema):
     """
+    Parameters
+    ----------
+    table : str
+        Google Bigquery full table reference 'project_id.dataset_id.table_id'
+   
+    schema : dict
+        Schema as returned by pandas_gbq.gbq.GbqConnector.schema()
+
+    Returns
+    -------
+    str
+        Bigquery standard-SQL statement for querying table statistics.
+
     Generates StandardSQL for reflection/inspection of
     - MIN,MAX,COUNTIF(IS NULL) for INTEGERS
     - COUNT(DISTINCT) for STRINGS
@@ -122,15 +136,24 @@ def generate_sql(project_id, dataset_id, table_id, schema):
             for column in col_by_type["STRING"]
         ]
     )
-    return (
-        "SELECT "
-        + select_clause_integers
-        +
-        # TO DO: FIX TRAILING COMMA ERROR WHEN NO STRING_CLAUSE
-        " , "
-        + select_clause_strings
-        + f" FROM `{project_id}.{dataset_id}.{table_id}`"
+
+    select_clause = ", ".join(
+        filter(None, [select_clause_integers, select_clause_strings])
     )
+
+    if select_clause:
+        return " ".join(
+            [
+                "SELECT",
+                select_clause,
+                f" FROM `{table_reference_string}`",
+            ]
+        )
+
+    else:
+        # no non-repeated INT64 or STRING columns
+        # TO DO: handle exception more gracefully
+        pass
 
 
 def _determine_int_type(min, max, nullcount):
@@ -172,4 +195,4 @@ def _determine_int_type(min, max, nullcount):
 def _determine_string_type(fraction_unique, threshold=0.5):
     """
     """
-    return "category" if fraction_unique < threshold else "object"
+    return 'category' if fraction_unique < threshold else "object"
